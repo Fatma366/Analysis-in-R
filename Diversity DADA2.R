@@ -1,91 +1,130 @@
+# Before installing DADA2, install some required dependencies
+install.packages("BiocManager")
+BiocManager::install("ShortRead")
+BiocManager::install("Biostrings", force = TRUE)
+
+# install dada2
 if (!requireNamespace("BiocManager", quietly = TRUE))
   install.packages("BiocManager")
-BiocManager::install("dada2")
-a
-##16s rRNA-seq analysis of CRC metagenomes
-#Quality check: R, xml2, httpuv, latticeExtra, dada2
-# China Data
-fastq_path <- "C:/Users/Admin/Downloads/SraAccessionList/"
+BiocManager::install("dada2", force = TRUE)
+
+#load package
+library(dada2)
+packageVersion("dada2")
+library(stats)
+
+# 16s rRNA-seq analysis of CYD 
+# If the package successfully loaded and your listed files match those here, you are ready to go through the DADA2 pipeline. 
+fastq_path <- "C:/Users/Admin/Documents/DADA2_pipeline/qiime2/demux"
 list.files(fastq_path)
 
-#Assign Sample Names:
-library(dada2)
-library(phyloseq)
-library(ggplot2)
+# Single-end fastq filenames have format: SAMPLENAME.fastq.gz
+fnFastq <- sort(list.files(fastq_path, pattern=".fastq.gz", full.names = TRUE))
+fnFastq
 
-fnFs1 <- sort(list.files(fastq_path, pattern="_1.fastq", full.names = TRUE))
-fnFs1
-fnRs1<- sort(list.files(fastq_path, pattern="_2.fastq", full.names = TRUE))
-fnRs1
-# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
-sample.names <- sapply(strsplit(basename(fnFs1), "_"), `[`, 1)
-
-#sample.names <- sapply(strsplit(basename(fnFs), "\\.") , `[`, 1)
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq.gz
+sample.names <- sapply(strsplit(basename(fnFastq), "_"), `[`, 1)
 sample.names
 
-#Plot Quality Control charts:
-plotQualityProfile(fnFs[1:2])
-plotQualityProfile(fnRs[1:4])
+##Plot Quality Control charts:visualizing the quality profiles of the forward reads
+plotQualityProfile(fnFastq[1:4])
+
+# Inspect quality profiles
+quality_plots <- plotQualityProfile(fnFastq[1:4])
+
+#Save quality plots pdf
+library(ggplot2)
+ggsave(plot = quality_plots, filename = "quality_reads.pdf",
+       width = 10, height = 10, dpi = 300)
 
 #Assign names of the Filtered sequences:
-filtFs1 <- file.path(fastq_path, "filter1", paste0(sample.names, "_1_filt.fastq.gz"))
-filtRs1 <- file.path(fastq_path, "filter1", paste0(sample.names, "_2_filt.fastq.gz"))
-filtFs1
-names(filtFs1) <- sample.names
-#names(filtRs) <- sample.names
-#filtRs
+##Place filtered files in filtered/subdirectory
+filtFiles <- file.path(fastq_path, "filtered", paste0(sample.names, "_filt.fastq.gz"))
+names(filtFiles) <- sample.names
+
 #Trimming of the sequences:
-#out <- filterAndTrim(fnFs, filtFs,fnRs,filtRs,truncLen =(240,160)  ,maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE, compress=TRUE, multithread=TRUE, minQ=20, verbose=TRUE)
-#out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs,minQ=20, verbose=TRUE)
-out # This will spit out the number of the input and output reads.
-out3 <- filterAndTrim(fnFs1, filtFs1, fnRs1, filtRs1, truncLen=c(240,160), maxEE=c(2,2), truncQ=2, minQ=20,compress=TRUE)
-out3
-##Generate the Filtered Profiles
-#Perform Quality check and generate new profiles for filtered sequences:
-plotQualityProfile(filtFs[1:4])
-#plotQualityProfile(filtRs[1:4])
+filtered_out <- filterAndTrim(fnFastq, filtFiles,
+                              truncLen=c(240), trimLeft=20, maxEE=2, truncQ=2, maxN=0, rm.phix=TRUE,
+                              compress=TRUE, verbose = TRUE)
+head(filtered_out)
 
-##Error Rate Profiles
-#Generate the Estimated Error Rates for Forward and Reverse Sequences
-errF1 <- learnErrors(filtFs1, multithread=TRUE)
-errR1 <- learnErrors(filtRs1, multithread=TRUE)
+#Generate the Filtered Profiles and Perform Quality check and generate new profiles for filtered sequences:
+quality_filt_plots = plotQualityProfile(filtFiles[1:4])
 
-#To visualize the estimated error rates:
-#plotErrors(errF, nominalQ=TRUE)
+#Save quality plots pdf
+library(ggplot2)
+ggsave(plot = quality_filt_plots, filename = "quality_filt_reads.pdf",
+       width = 10, height = 10, dpi = 300)
 
-#Third step is the dereplication:
-derepFs1 <- derepFastq(filtFs1, verbose=TRUE)
-derepFs1
-derepRs1 <- derepFastq(filtRs1, verbose=TRUE)
-derepFs1
+#Error Rate Profiles and Generate the Estimated Error Rates for Forward and Reverse Sequences
+errF <- learnErrors(filtFiles)
+plotErrors(errF, nominalQ=TRUE)
+#To visualize the estimated error rates:Plot the error rates
+error_rates <- plotErrors(errF, nominalQ=TRUE)
+
+#Save error plots pdf
+pdf("estimated_error_rates.pdf")
+ggsave(plot = error_rates, filename = "estimated_error_rates.pdf",
+       width = 10, height = 10, dpi = 300)
+# Close the PDF device
+dev.off()
+
+#dereplication:combines all identical sequencing reads into into “unique sequences” 
+#with a corresponding “abundance” equal to the number of reads with that unique sequence
+derep_forward <- derepFastq(filtFiles, verbose=TRUE)
+derep_forward
+names(derep_forward) <- sample.names
 
 ##Sample Inference:
-#Fourth step is the sample inference:
-dadaFs1 <- dada(derepFs1, err=errF1, multithread=TRUE)
-dadaRs1 <- dada(derepRs1, err=errR1, multithread=TRUE)
+dadaFs <- dada(derep_forward, err=errF, multithread=TRUE, pool=TRUE)
+#Inspecting the returned dada-class object:
+dadaFs[[1]]
 
-#5th step: Merging paired reads:
-#mergers <- mergePairs(dadaFs, derepFs, verbose=TRUE)
+#5th step: Merging paired reads:but i have SE
 #mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
 #mergers
-#6th: Last step is sequence table construction:
-seqtab1 <- makeSequenceTable(dadaFs1)
-seqtab1
+
+#sequence table construction:
+seqtab <- makeSequenceTable(dadaFs)
+dim(seqtab)
+
 # View No. of samples and No. of variants
 dim(seqtab1)
 
-# View the distribution of the sequences
-table(nchar(getSequences(seqtab1)))
+# Inspect distribution of sequence lengths
+table(nchar(getSequences(seqtab)))
 
 # Then, removing the chimeras: # This step could take long if verbose=TRUE
-data1 <- removeBimeraDenovo(seqtab1, method="consensus", multithread=TRUE, verbose=FALSE)
-write.table(data1,"C:/Users/Admin/Downloads/SraAccessionList/metadata_PRJNA818796.txt",sep="\t",append = TRUE)
-View(data1)
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+View(seqtab.nochim)
 # Check the no. of samples and no. of variants when chimeras are removed
-dim(data1)
-#Finally, Assigning the taxonomy:
+dim(seqtab.nochim)
 
+sum(seqtab.nochim)/sum(seqtab)
 
+# Track reads through the pipeline so far
+getN <- function(x) sum(getUniques(x))
+track <- cbind(filtered_out, getN(dadaFs), getN(derep_forward), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoised", "merged", "dereplicated_reads", "nonchim")
+rownames(track) <- sample.names
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(filtered_out, sapply(dadaFs, getN), rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "nonchim")
+rownames(track) <- sample.names
+head(track)
+print(track)
+
+#saving the track info in tsv file
+write.table(track, "read-count-tracking.tsv", quote=FALSE, sep="\t", col.names=NA)
+
+#Assign taxonomy
+# used this at first install.packages("DECIPHER") but it didnt work so installed using bioconductor
+BiocManager::install("DECIPHER")
+library(DECIPHER)
+
+IHAVE REACHED HERE!!!!!!
 # To see the first lines of taxonomy:
 #unname(head(taxa))
 
